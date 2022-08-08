@@ -81,6 +81,11 @@ require (
 )
 
 require (
+	github.com/heimdalr/dag v1.2.1 // indirect
+	github.com/orcaman/concurrent-map/v2 v2.0.0 // indirect
+)
+
+require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v0.21.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v0.8.3 // indirect
 	github.com/Masterminds/goutils v1.1.0 // indirect

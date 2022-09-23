@@ -88,8 +88,9 @@ type Peer struct {
 	reqCancel   chan *cancel   // Dispatch channel to cancel pending requests and untrack them
 	resDispatch chan *response // Dispatch channel to fulfil pending requests and untrack them
 
-	term chan struct{} // Termination channel to stop the broadcasters
-	lock sync.RWMutex  // Mutex protecting the internal fields
+	term         chan struct{} // Termination channel to stop the broadcasters
+	lock         sync.RWMutex  // Mutex protecting the internal fields
+	IsSyncTarget bool
 }
 
 // NewPeer create a wrapper for a network connection and negotiated  protocol
@@ -113,10 +114,11 @@ func NewPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter, txpool TxPool) *Pe
 		term:            make(chan struct{}),
 	}
 	// Start up all the broadcasters
-	go peer.broadcastBlocks()
-	go peer.broadcastTransactions()
-	go peer.announceTransactions()
-	go peer.dispatcher()
+	// TODO: 🔥
+	//go peer.broadcastBlocks()
+	//go peer.broadcastTransactions()
+	//go peer.announceTransactions()
+	//go peer.dispatcher()
 
 	return peer
 }
@@ -178,6 +180,11 @@ func (p *Peer) markBlock(hash common.Hash) {
 func (p *Peer) markTransaction(hash common.Hash) {
 	// If we reached the memory allowance, drop a previously known transaction hash
 	p.knownTxs.Add(hash)
+}
+
+func (p *Peer) MarkTransaction(hash common.Hash) {
+	// If we reached the memory allowance, drop a previously known transaction hash
+	p.markTransaction(hash)
 }
 
 // SendTransactions sends transactions to the peer and includes the hashes
@@ -485,6 +492,29 @@ func (p *Peer) RequestTxs(hashes []common.Hash) error {
 		RequestId:                   id,
 		GetPooledTransactionsPacket: hashes,
 	})
+}
+
+// TODO: 🔥
+func (p *Peer) RequestTransaction66(requestId uint64, hashes []common.Hash) error {
+	return p2p.Send(p.rw, GetPooledTransactionsMsg, GetPooledTransactionsPacket66{RequestId: requestId, GetPooledTransactionsPacket: hashes})
+}
+
+// TODO: 🔥
+func (p *Peer) RequestReceipts66(requestId uint64, hashes []common.Hash) error {
+	return p2p.Send(p.rw, GetReceiptsMsg, GetReceiptsPacket66{RequestId: requestId, GetReceiptsPacket: hashes})
+}
+
+// TODO: 🔥
+func (p *Peer) GetRw() p2p.MsgReadWriter {
+	if p == nil {
+		return nil
+	}
+	return p.rw
+}
+
+// TODO: 🔥
+func (p *Peer) AsyncSendTransactionsRaw(transactions types.Transactions) {
+
 }
 
 // knownCache is a cache for known hashes.

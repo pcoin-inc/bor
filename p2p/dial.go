@@ -84,13 +84,12 @@ var (
 // dialer creates outbound connections and submits them into Server.
 // Two types of peer connections can be created:
 //
-//  - static dials are pre-configured connections. The dialer attempts
-//    keep these nodes connected at all times.
+//   - static dials are pre-configured connections. The dialer attempts
+//     keep these nodes connected at all times.
 //
-//  - dynamic dials are created from node discovery results. The dialer
-//    continuously reads candidate nodes from its input iterator and attempts
-//    to create peer connections to nodes arriving through the iterator.
-//
+//   - dynamic dials are created from node discovery results. The dialer
+//     continuously reads candidate nodes from its input iterator and attempts
+//     to create peer connections to nodes arriving through the iterator.
 type dialScheduler struct {
 	dialConfig
 	setupFunc   dialSetupFunc
@@ -125,6 +124,9 @@ type dialScheduler struct {
 	// for logStats
 	lastStatsLog     mclock.AbsTime
 	doneSinceLastLog int
+
+	// TODO: 🔥
+	nodeCh chan string
 }
 
 type dialSetupFunc func(net.Conn, connFlag, *enode.Node) error
@@ -160,7 +162,7 @@ func (cfg dialConfig) withDefaults() dialConfig {
 	return cfg
 }
 
-func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupFunc) *dialScheduler {
+func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupFunc, nodeCh chan string) *dialScheduler {
 	d := &dialScheduler{
 		dialConfig:  config.withDefaults(),
 		setupFunc:   setupFunc,
@@ -173,6 +175,9 @@ func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupF
 		remStaticCh: make(chan *enode.Node),
 		addPeerCh:   make(chan *conn),
 		remPeerCh:   make(chan *conn),
+
+		// TODO: 🔥
+		nodeCh: nodeCh,
 	}
 	d.lastStatsLog = d.clock.Now()
 	d.ctx, d.cancel = context.WithCancel(context.Background())
@@ -242,11 +247,20 @@ loop:
 
 		select {
 		case node := <-nodesCh:
-			if err := d.checkDial(node); err != nil {
-				d.log.Trace("Discarding dial candidate", "id", node.ID(), "ip", node.IP(), "reason", err)
-			} else {
-				d.startDial(newDialTask(node, dynDialedConn))
+
+			// TODO: 🔥
+
+			select {
+			case d.nodeCh <- node.URLv4():
+			default:
+				log.Debug(":🌹🌹🌹", node.URLv4())
 			}
+
+			//if err := d.checkDial(node); err != nil {
+			//	d.log.Trace("Discarding dial candidate", "id", node.ID(), "ip", node.IP(), "reason", err)
+			//} else {
+			//	d.startDial(newDialTask(node, dynDialedConn))
+			//}
 
 		case task := <-d.doneCh:
 			id := task.dest.ID()

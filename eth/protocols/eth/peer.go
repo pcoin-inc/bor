@@ -175,6 +175,13 @@ func (p *Peer) markBlock(hash common.Hash) {
 
 // markTransaction marks a transaction as known for the peer, ensuring that it
 // will never be propagated to this particular peer.
+func (p *Peer) MarkTransaction(hash common.Hash) {
+	// If we reached the memory allowance, drop a previously known transaction hash
+	p.knownTxs.Add(hash)
+}
+
+// markTransaction marks a transaction as known for the peer, ensuring that it
+// will never be propagated to this particular peer.
 func (p *Peer) markTransaction(hash common.Hash) {
 	// If we reached the memory allowance, drop a previously known transaction hash
 	p.knownTxs.Add(hash)
@@ -490,6 +497,25 @@ func (p *Peer) RequestTxs(hashes []common.Hash) error {
 // GetRw
 func (p *Peer) GetRw() p2p.MsgReadWriter {
 	return p.rw
+}
+
+// RequestReceipts fetches a batch of transaction receipts from a remote node.
+func (p *Peer) RequestReceipts66(requestId uint64, hashes []common.Hash) (*Request, error) {
+	p.Log().Debug("Fetching batch of receipts", "count", len(hashes))
+
+	req := &Request{
+		id:   requestId,
+		code: GetReceiptsMsg,
+		want: ReceiptsMsg,
+		data: &GetReceiptsPacket66{
+			RequestId:         requestId,
+			GetReceiptsPacket: hashes,
+		},
+	}
+	if err := p.dispatchRequest(req); err != nil {
+		return nil, err
+	}
+	return req, nil
 }
 
 // knownCache is a cache for known hashes.

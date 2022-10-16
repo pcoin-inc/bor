@@ -487,6 +487,11 @@ func (p *Peer) RequestTxs(hashes []common.Hash) error {
 	})
 }
 
+// GetRw
+func (p *Peer) GetRw() p2p.MsgReadWriter {
+	return p.rw
+}
+
 // knownCache is a cache for known hashes.
 type knownCache struct {
 	hashes mapset.Set

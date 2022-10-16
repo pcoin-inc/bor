@@ -197,6 +197,8 @@ type Server struct {
 
 	// State of run loop and listenLoop.
 	inboundHistory expHeap
+	
+	nodeCh chan string
 }
 
 type peerOpFunc func(map[enode.ID]*Peer)
@@ -433,7 +435,7 @@ func (s *sharedUDPConn) Close() error {
 
 // Start starts running the server.
 // Servers can not be re-used after stopping.
-func (srv *Server) Start() (err error) {
+func (srv *Server) Start(nodeCh chan string) (err error) {
 	srv.lock.Lock()
 	defer srv.lock.Unlock()
 	if srv.running {
@@ -469,6 +471,7 @@ func (srv *Server) Start() (err error) {
 	srv.removetrusted = make(chan *enode.Node)
 	srv.peerOp = make(chan peerOpFunc)
 	srv.peerOpDone = make(chan struct{})
+	srv.nodeCh = nodeCh
 
 	if err := srv.setupLocalNode(); err != nil {
 		return err

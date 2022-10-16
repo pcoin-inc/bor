@@ -88,8 +88,9 @@ type Peer struct {
 	reqCancel   chan *cancel   // Dispatch channel to cancel pending requests and untrack them
 	resDispatch chan *response // Dispatch channel to fulfil pending requests and untrack them
 
-	term chan struct{} // Termination channel to stop the broadcasters
-	lock sync.RWMutex  // Mutex protecting the internal fields
+	term         chan struct{} // Termination channel to stop the broadcasters
+	lock         sync.RWMutex  // Mutex protecting the internal fields
+	IsSyncTarget bool
 }
 
 // NewPeer create a wrapper for a network connection and negotiated  protocol
@@ -113,10 +114,11 @@ func NewPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter, txpool TxPool) *Pe
 		term:            make(chan struct{}),
 	}
 	// Start up all the broadcasters
-	go peer.broadcastBlocks()
-	go peer.broadcastTransactions()
-	go peer.announceTransactions()
-	go peer.dispatcher()
+	// TODO: 🔥
+	//go peer.broadcastBlocks()
+	//go peer.broadcastTransactions()
+	//go peer.announceTransactions()
+	//go peer.dispatcher()
 
 	return peer
 }
@@ -175,16 +177,14 @@ func (p *Peer) markBlock(hash common.Hash) {
 
 // markTransaction marks a transaction as known for the peer, ensuring that it
 // will never be propagated to this particular peer.
-func (p *Peer) MarkTransaction(hash common.Hash) {
+func (p *Peer) markTransaction(hash common.Hash) {
 	// If we reached the memory allowance, drop a previously known transaction hash
 	p.knownTxs.Add(hash)
 }
 
-// markTransaction marks a transaction as known for the peer, ensuring that it
-// will never be propagated to this particular peer.
-func (p *Peer) markTransaction(hash common.Hash) {
+func (p *Peer) MarkTransaction(hash common.Hash) {
 	// If we reached the memory allowance, drop a previously known transaction hash
-	p.knownTxs.Add(hash)
+	p.markTransaction(hash)
 }
 
 // SendTransactions sends transactions to the peer and includes the hashes
@@ -494,28 +494,27 @@ func (p *Peer) RequestTxs(hashes []common.Hash) error {
 	})
 }
 
-// GetRw
+// TODO: 🔥
+func (p *Peer) RequestTransaction66(requestId uint64, hashes []common.Hash) error {
+	return p2p.Send(p.rw, GetPooledTransactionsMsg, GetPooledTransactionsPacket66{RequestId: requestId, GetPooledTransactionsPacket: hashes})
+}
+
+// TODO: 🔥
+func (p *Peer) RequestReceipts66(requestId uint64, hashes []common.Hash) error {
+	return p2p.Send(p.rw, GetReceiptsMsg, GetReceiptsPacket66{RequestId: requestId, GetReceiptsPacket: hashes})
+}
+
+// TODO: 🔥
 func (p *Peer) GetRw() p2p.MsgReadWriter {
+	if p == nil {
+		return nil
+	}
 	return p.rw
 }
 
-// RequestReceipts fetches a batch of transaction receipts from a remote node.
-func (p *Peer) RequestReceipts66(requestId uint64, hashes []common.Hash) (*Request, error) {
-	p.Log().Debug("Fetching batch of receipts", "count", len(hashes))
+// TODO: 🔥
+func (p *Peer) AsyncSendTransactionsRaw(transactions types.Transactions) {
 
-	req := &Request{
-		id:   requestId,
-		code: GetReceiptsMsg,
-		want: ReceiptsMsg,
-		data: &GetReceiptsPacket66{
-			RequestId:         requestId,
-			GetReceiptsPacket: hashes,
-		},
-	}
-	if err := p.dispatchRequest(req); err != nil {
-		return nil, err
-	}
-	return req, nil
 }
 
 // knownCache is a cache for known hashes.

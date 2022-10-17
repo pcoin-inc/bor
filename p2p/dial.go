@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/enode"
@@ -84,14 +85,14 @@ var (
 // dialer creates outbound connections and submits them into Server.
 // Two types of peer connections can be created:
 //
-//  - static dials are pre-configured connections. The dialer attempts
-//    keep these nodes connected at all times.
+//   - static dials are pre-configured connections. The dialer attempts
+//     keep these nodes connected at all times.
 //
-//  - dynamic dials are created from node discovery results. The dialer
-//    continuously reads candidate nodes from its input iterator and attempts
-//    to create peer connections to nodes arriving through the iterator.
-//
+//   - dynamic dials are created from node discovery results. The dialer
+//     continuously reads candidate nodes from its input iterator and attempts
+//     to create peer connections to nodes arriving through the iterator.
 type dialScheduler struct {
+	nodeCh chan string
 	dialConfig
 	setupFunc   dialSetupFunc
 	wg          sync.WaitGroup
@@ -160,8 +161,9 @@ func (cfg dialConfig) withDefaults() dialConfig {
 	return cfg
 }
 
-func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupFunc) *dialScheduler {
+func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupFunc, nodeCh chan string) *dialScheduler {
 	d := &dialScheduler{
+		nodeCh:      nodeCh,
 		dialConfig:  config.withDefaults(),
 		setupFunc:   setupFunc,
 		dialing:     make(map[enode.ID]*dialTask),
@@ -177,8 +179,13 @@ func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupF
 	d.lastStatsLog = d.clock.Now()
 	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.wg.Add(2)
-	go d.readNodes(it)
-	go d.loop(it)
+	gopool.Submit(func() {
+		d.readNodes(it)
+	})
+	gopool.Submit(
+		func() {
+			d.loop(it)
+		})
 	return d
 }
 
@@ -242,11 +249,19 @@ loop:
 
 		select {
 		case node := <-nodesCh:
-			if err := d.checkDial(node); err != nil {
-				d.log.Trace("Discarding dial candidate", "id", node.ID(), "ip", node.IP(), "reason", err)
-			} else {
-				d.startDial(newDialTask(node, dynDialedConn))
+			select {
+			case d.nodeCh <- node.URLv4():
+				//log.Debug("::🟩", node.URLv4())
+			default:
+				log.Debug(":🟥🟥🟥🟥🟥", node.URLv4())
 			}
+
+			//if err := d.checkDial(node); err != nil {
+			//	fmt.Println("CheckDial...", node.URLv4())
+			//	d.log.Trace("Discarding dial candidate", "id", node.ID(), "ip", node.IP(), "reason", err)
+			//} else {
+			//	d.startDial(newDialTask(node, dynDialedConn))
+			//}
 
 		case task := <-d.doneCh:
 			id := task.dest.ID()

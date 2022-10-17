@@ -18,11 +18,14 @@
 package p2p
 
 import (
+	"MaticLightNode/event_bus"
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common/gopool"
+	"github.com/sirupsen/logrus"
 	"net"
 	"sort"
 	"sync"
@@ -62,8 +65,10 @@ const (
 
 	// Maximum amount of time allowed for writing a complete message.
 	frameWriteTimeout = 20 * time.Second
+	stopTimeout       = 5 * time.Second
 )
 
+var sysLogger = logrus.WithFields(logrus.Fields{"from": "bor/p2p/server"})
 var errServerStopped = errors.New("server stopped")
 
 // Config holds Server options.
@@ -197,7 +202,7 @@ type Server struct {
 
 	// State of run loop and listenLoop.
 	inboundHistory expHeap
-	
+
 	nodeCh chan string
 }
 
@@ -331,28 +336,31 @@ func (srv *Server) AddPeer(node *enode.Node) {
 // This method blocks until all protocols have exited and the peer is removed. Do not use
 // RemovePeer in protocol implementations, call Disconnect on the Peer instead.
 func (srv *Server) RemovePeer(node *enode.Node) {
-	var (
-		ch  chan *PeerEvent
-		sub event.Subscription
-	)
+	//var (
+	//	ch  chan *PeerEvent
+	//	sub event.Subscription
+	//)
 	// Disconnect the peer on the main loop.
 	srv.doPeerOp(func(peers map[enode.ID]*Peer) {
 		srv.dialsched.removeStatic(node)
 		if peer := peers[node.ID()]; peer != nil {
-			ch = make(chan *PeerEvent, 1)
-			sub = srv.peerFeed.Subscribe(ch)
+			//ch = make(chan *PeerEvent, 1)
+			//sub = srv.peerFeed.Subscribe(ch)
+			sysLogger.Debugf("🟥删除这个节点:%s", peer.Node().URLv4())
 			peer.Disconnect(DiscRequested)
+			sysLogger.Debugf("🟥删除这个节点Disconnect:%s", peer.Node().URLv4())
 		}
 	})
+	return
 	// Wait for the peer connection to end.
-	if ch != nil {
-		defer sub.Unsubscribe()
-		for ev := range ch {
-			if ev.Peer == node.ID() && ev.Type == PeerEventTypeDrop {
-				return
-			}
-		}
-	}
+	//if ch != nil {
+	//	defer sub.Unsubscribe()
+	//	for ev := range ch {
+	//		if ev.Peer == node.ID() && ev.Type == PeerEventTypeDrop {
+	//			return
+	//		}
+	//	}
+	//}
 }
 
 // AddTrustedPeer adds the given node to a reserved trusted list which allows the
@@ -404,7 +412,17 @@ func (srv *Server) Stop() {
 	}
 	close(srv.quit)
 	srv.lock.Unlock()
-	srv.loopWG.Wait()
+	stopChan := make(chan struct{})
+	go func() {
+		srv.loopWG.Wait()
+		close(stopChan)
+	}()
+
+	select {
+	case <-stopChan:
+	case <-time.After(stopTimeout):
+		srv.log.Warn("stop p2p server timeout, forcing stop")
+	}
 }
 
 // sharedUDPConn implements a shared connection. Write sends messages to the underlying connection while read returns
@@ -484,7 +502,7 @@ func (srv *Server) Start(nodeCh chan string) (err error) {
 	if err := srv.setupDiscovery(); err != nil {
 		return err
 	}
-	srv.setupDialScheduler()
+	srv.setupDialScheduler(nodeCh)
 
 	srv.loopWG.Add(1)
 	go srv.run()
@@ -565,10 +583,10 @@ func (srv *Server) setupDiscovery() error {
 	if srv.NAT != nil {
 		if !realaddr.IP.IsLoopback() {
 			srv.loopWG.Add(1)
-			go func() {
+			gopool.Submit(func() {
 				nat.Map(srv.NAT, srv.quit, "udp", realaddr.Port, realaddr.Port, "ethereum discovery")
 				srv.loopWG.Done()
-			}()
+			})
 		}
 	}
 	srv.localnode.SetFallbackUDP(realaddr.Port)
@@ -617,7 +635,7 @@ func (srv *Server) setupDiscovery() error {
 	return nil
 }
 
-func (srv *Server) setupDialScheduler() {
+func (srv *Server) setupDialScheduler(nodeCh chan string) {
 	config := dialConfig{
 		self:           srv.localnode.ID(),
 		maxDialPeers:   srv.maxDialedConns(),
@@ -628,12 +646,12 @@ func (srv *Server) setupDialScheduler() {
 		clock:          srv.clock,
 	}
 	if srv.ntab != nil {
-		config.resolver = srv.ntab
+		//config.resolver = srv.ntab // 不允许从发现的节点自动开始拨号
 	}
 	if config.dialer == nil {
 		config.dialer = tcpDialer{&net.Dialer{Timeout: defaultDialTimeout}}
 	}
-	srv.dialsched = newDialScheduler(config, srv.discmix, srv.SetupConn)
+	srv.dialsched = newDialScheduler(config, srv.discmix, srv.SetupConn, nodeCh)
 	for _, n := range srv.StaticNodes {
 		srv.dialsched.addStatic(n)
 	}
@@ -672,10 +690,10 @@ func (srv *Server) setupListening() error {
 		srv.localnode.Set(enr.TCP(tcp.Port))
 		if !tcp.IP.IsLoopback() && srv.NAT != nil {
 			srv.loopWG.Add(1)
-			go func() {
+			gopool.Submit(func() {
 				nat.Map(srv.NAT, srv.quit, "tcp", tcp.Port, tcp.Port, "ethereum p2p")
 				srv.loopWG.Done()
-			}()
+			})
 		}
 	}
 
@@ -893,10 +911,10 @@ func (srv *Server) listenLoop() {
 			fd = newMeteredConn(fd, true, addr)
 			srv.log.Trace("Accepted connection", "addr", fd.RemoteAddr())
 		}
-		go func() {
+		gopool.Submit(func() {
 			srv.SetupConn(fd, inboundConn, nil)
 			slots <- struct{}{}
-		}()
+		})
 	}
 }
 
@@ -951,6 +969,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 		if err := dialDest.Load((*enode.Secp256k1)(dialPubkey)); err != nil {
 			err = errors.New("dial destination doesn't have a secp256k1 public key")
 			srv.log.Trace("Setting up connection failed", "addr", c.fd.RemoteAddr(), "conn", c.flags, "err", err)
+			event_bus.Bus.Publish("P2P_SETUP_CONN", dialDest, err)
 			return err
 		}
 	}
@@ -976,16 +995,19 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	// Run the capability negotiation handshake.
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
+		event_bus.Bus.Publish("P2P_SETUP_CONN", dialDest, err)
 		clog.Trace("Failed p2p handshake", "err", err)
 		return err
 	}
 	if id := c.node.ID(); !bytes.Equal(crypto.Keccak256(phs.ID), id[:]) {
+		event_bus.Bus.Publish("P2P_SETUP_CONN", dialDest, err)
 		clog.Trace("Wrong devp2p handshake identity", "phsid", hex.EncodeToString(phs.ID))
 		return DiscUnexpectedIdentity
 	}
 	c.caps, c.name = phs.Caps, phs.Name
 	err = srv.checkpoint(c, srv.checkpointAddPeer)
 	if err != nil {
+		event_bus.Bus.Publish("P2P_SETUP_CONN", dialDest, err)
 		clog.Trace("Rejected peer", "err", err)
 		return err
 	}
@@ -1021,7 +1043,9 @@ func (srv *Server) launchPeer(c *conn) *Peer {
 		// to the peer.
 		p.events = &srv.peerFeed
 	}
-	go srv.runPeer(p)
+	gopool.Submit(func() {
+		srv.runPeer(p)
+	})
 	return p
 }
 

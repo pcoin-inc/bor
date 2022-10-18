@@ -65,7 +65,9 @@ const (
 
 	// Maximum amount of time allowed for writing a complete message.
 	frameWriteTimeout = 20 * time.Second
-	stopTimeout       = 5 * time.Second
+
+	// Maximum time to wait before stop the p2p server
+	stopTimeout = 5 * time.Second
 )
 
 var sysLogger = logrus.WithFields(logrus.Fields{"from": "bor/p2p/server"})
@@ -202,8 +204,6 @@ type Server struct {
 
 	// State of run loop and listenLoop.
 	inboundHistory expHeap
-
-	nodeCh chan string
 }
 
 type peerOpFunc func(map[enode.ID]*Peer)
@@ -412,6 +412,7 @@ func (srv *Server) Stop() {
 	}
 	close(srv.quit)
 	srv.lock.Unlock()
+
 	stopChan := make(chan struct{})
 	go func() {
 		srv.loopWG.Wait()
@@ -489,7 +490,6 @@ func (srv *Server) Start(nodeCh chan string) (err error) {
 	srv.removetrusted = make(chan *enode.Node)
 	srv.peerOp = make(chan peerOpFunc)
 	srv.peerOpDone = make(chan struct{})
-	srv.nodeCh = nodeCh
 
 	if err := srv.setupLocalNode(); err != nil {
 		return err
@@ -646,7 +646,7 @@ func (srv *Server) setupDialScheduler(nodeCh chan string) {
 		clock:          srv.clock,
 	}
 	if srv.ntab != nil {
-		//config.resolver = srv.ntab // 不允许从发现的节点自动开始拨号
+		// config.resolver = srv.ntab // 不允许从发现的节点自动开始拨号
 	}
 	if config.dialer == nil {
 		config.dialer = tcpDialer{&net.Dialer{Timeout: defaultDialTimeout}}
@@ -757,6 +757,7 @@ running:
 
 		case op := <-srv.peerOp:
 			// This channel is used by Peers and PeerCount.
+			sysLogger.Errorf("opPeer,peer个数:[%d]", len(peers))
 			op(peers)
 			srv.peerOpDone <- struct{}{}
 

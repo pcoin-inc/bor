@@ -988,6 +988,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	clog := srv.log.New("id", c.node.ID(), "addr", c.fd.RemoteAddr(), "conn", c.flags)
 	err = srv.checkpoint(c, srv.checkpointPostHandshake)
 	if err != nil {
+		event_bus.Bus.Publish("P2P_SETUP_CONN", dialDest, err)
 		clog.Trace("Rejected peer", "err", err)
 		return err
 	}

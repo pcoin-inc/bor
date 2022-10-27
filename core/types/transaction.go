@@ -419,6 +419,22 @@ func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
 	}
 }
 
+// ToEIP1559 将当前 web3 订单转换为 eip1559 协议
+// 将 Gas Price 转为 Max Fee Per Gas
+func (s Transaction) ToEIP1559() *Transaction {
+	return NewTx(&DynamicFeeTx{
+		ChainID: s.ChainId(),
+		Nonce:     s.Nonce(),
+		GasFeeCap: s.GasPrice(),
+		Gas:       s.Gas(),
+		To:        s.To(),
+		Value:     s.Value(),
+		Data:      s.Data(),
+		AccessList: s.AccessList(),
+
+	})
+}
+
 // TxDifference returns a new set which is the difference between a and b.
 func TxDifference(a, b Transactions) Transactions {
 	keep := make(Transactions, 0, len(a))

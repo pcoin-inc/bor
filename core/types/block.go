@@ -255,6 +255,10 @@ func CopyHeader(h *Header) *Header {
 	return &cpy
 }
 
+func (b *Block) Td() *big.Int{
+	return b.td
+}
+
 // DecodeRLP decodes the Ethereum
 func (b *Block) DecodeRLP(s *rlp.Stream) error {
 	var eb extblock
